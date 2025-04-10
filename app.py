@@ -23,14 +23,40 @@ else:
 
 def get_pdf_text(pdf_docs):
     """
-    Extract text from uploaded PDF documents
+    Extract text from uploaded PDF documents with progress tracking
     """
     text = ""
     try:
-        for pdf in pdf_docs:
-            pdf_reader = PdfReader(pdf)
-            for page in pdf_reader.pages:
-                text += page.extract_text()
+        # Create a progress bar
+        progress_text = "Extracting text from PDFs..."
+        total_pdfs = len(pdf_docs)
+        
+        if total_pdfs > 0:
+            progress_bar = st.progress(0)
+            
+            for i, pdf in enumerate(pdf_docs):
+                # Update progress
+                progress_percent = (i / total_pdfs)
+                progress_bar.progress(progress_percent, text=f"Processing PDF {i+1}/{total_pdfs}")
+                
+                # Process the PDF in chunks to avoid memory issues
+                pdf_reader = PdfReader(pdf)
+                total_pages = len(pdf_reader.pages)
+                
+                # Process pages with nested progress
+                for j, page in enumerate(pdf_reader.pages):
+                    # Update page progress
+                    sub_progress = progress_percent + ((j / total_pages) * (1 / total_pdfs))
+                    progress_bar.progress(sub_progress, text=f"PDF {i+1}/{total_pdfs}: Page {j+1}/{total_pages}")
+                    
+                    # Extract and add text
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n\n"
+            
+            # Complete the progress
+            progress_bar.progress(1.0, text="PDF processing complete!")
+            
         return text
     except Exception as e:
         st.error(f"Error extracting text from PDF: {str(e)}")
@@ -38,14 +64,28 @@ def get_pdf_text(pdf_docs):
 
 def get_text_chunks(text):
     """
-    Split text into manageable chunks for processing
+    Split text into manageable chunks for processing with progress indicator
     """
     if not text:
         return []
     
     try:
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
-        chunks = text_splitter.split_text(text)
+        # Display info about chunking process
+        st.info("Splitting text into chunks for processing...")
+        
+        # Create text splitter with slightly smaller chunks to handle large documents better
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=8000,  # Smaller chunks for better handling
+            chunk_overlap=800,  # Slight overlap for context
+            length_function=len,
+            is_separator_regex=False,
+        )
+        
+        # Process with progress indicator
+        with st.spinner("Creating text chunks..."):
+            chunks = text_splitter.split_text(text)
+            st.success(f"Successfully created {len(chunks)} text chunks")
+            
         return chunks
     except Exception as e:
         st.error(f"Error splitting text into chunks: {str(e)}")
@@ -53,16 +93,57 @@ def get_text_chunks(text):
 
 def get_vector_store(text_chunks):
     """
-    Create and save vector embeddings of text chunks
+    Create and save vector embeddings of text chunks with progress monitoring
     """
     if not text_chunks:
         return False
     
     try:
+        chunk_count = len(text_chunks)
+        st.info(f"Creating embeddings for {chunk_count} chunks. This may take a few minutes for large documents...")
+        
+        # Display a progress bar for vector creation
+        progress_bar = st.progress(0)
+        
+        # Process in smaller batches to avoid timeout issues with large documents
+        batch_size = 50  # Process 50 chunks at a time
+        vector_store = None  # Initialize to None to prevent unbound variable error
+        
+        # Create the embedding model
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-        vector_store.save_local("faiss_index")
-        return True
+        
+        # Process chunks in batches with progress update
+        for i in range(0, chunk_count, batch_size):
+            # Calculate end index for current batch
+            end_idx = min(i + batch_size, chunk_count)
+            batch = text_chunks[i:end_idx]
+            
+            # Update progress
+            progress_percent = i / chunk_count
+            progress_bar.progress(progress_percent, text=f"Processing embeddings: {i}/{chunk_count} chunks")
+            
+            # Create vector store from batch
+            if i == 0:
+                # First batch: create the vector store
+                vector_store = FAISS.from_texts(batch, embedding=embeddings)
+            else:
+                # Add subsequent batches
+                if vector_store is not None:  # Check to make sure vector_store is defined
+                    batch_vectors = FAISS.from_texts(batch, embedding=embeddings)
+                    vector_store.merge_from(batch_vectors)
+                
+        # Set progress to complete
+        progress_bar.progress(1.0, text="Embeddings complete!")
+        
+        # Save the vector store
+        if vector_store is not None:
+            with st.spinner("Saving vector store to disk..."):
+                vector_store.save_local("faiss_index")
+                st.success("Vector store saved successfully!")
+                return True
+        else:
+            st.error("Failed to create vector store. No data was processed.")
+            return False
     except Exception as e:
         st.error(f"Error creating vector store: {str(e)}")
         return False
@@ -157,25 +238,28 @@ def main():
             if not pdf_docs:
                 st.error("Please upload at least one PDF document.")
             else:
-                with st.spinner("Reading and processing PDFs..."):
-                    # Get the text from PDFs
-                    raw_text = get_pdf_text(pdf_docs)
+                # Display processing status
+                status_container = st.empty()
+                status_container.info("Beginning document processing. This may take several minutes for large files...")
+                
+                # Step 1: Get the text from PDFs
+                raw_text = get_pdf_text(pdf_docs)
+                
+                # Check if text was extracted
+                if not raw_text:
+                    st.error("Could not extract text from the provided PDFs.")
+                else:
+                    # Step 2: Split the text into chunks
+                    status_container.info("PDF text extracted successfully! Now splitting into chunks...")
+                    text_chunks = get_text_chunks(raw_text)
                     
-                    # Check if text was extracted
-                    if not raw_text:
-                        st.error("Could not extract text from the provided PDFs.")
-                    else:
-                        # Split the text into chunks
-                        st.info(f"Splitting text into chunks...")
-                        text_chunks = get_text_chunks(raw_text)
+                    # Step 3: Create vector store
+                    if text_chunks:
+                        status_container.info(f"Text splitting complete! Now creating embeddings...")
+                        success = get_vector_store(text_chunks)
                         
-                        # Create vector store
-                        if text_chunks:
-                            st.info(f"Creating embeddings with {len(text_chunks)} chunks...")
-                            success = get_vector_store(text_chunks)
-                            
-                            if success:
-                                st.success("✅ Documents processed successfully! You can now ask questions.")
+                        if success:
+                            status_container.success("✅ Documents processed successfully! You can now ask questions about your document content.")
         
         # Sidebar information
         st.markdown("---")
