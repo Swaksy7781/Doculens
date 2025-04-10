@@ -36,6 +36,9 @@ conda-env/
 *.egg-info
 .env
 faiss_index/
+app/
+audit/
+security/
 
 # Jupyter Notebook related files
 .ipynb_checkpoints
