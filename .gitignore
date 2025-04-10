@@ -34,6 +34,7 @@ env/
 .venv/
 conda-env/
 *.egg-info
+.env
 
 # Jupyter Notebook related files
 .ipynb_checkpoints
