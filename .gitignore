@@ -1,0 +1,50 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# C extensions
+*.c
+*.cpp
+*.h
+
+# Distribution / packaging
+.eggs/
+dist/
+build/
+sdist/
+wheel/
+*.egg-info/
+MANIFEST
+
+# Installer logs
+*.install.log
+*.pth
+
+# PyInstaller builds
+**/__pyinstaller_cache__
+**/_MEI*
+
+# Environments
+venv/
+env/
+.venv/
+conda-env/
+*.egg-info
+
+# Jupyter Notebook related files
+.ipynb_checkpoints
+
+# MyPy cache
+.mypy_cache/
+
+# Other temporary files
+*.log
+*.tmp
+*.swp
+*.bak
+*.asv
+~*
