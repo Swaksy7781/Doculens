@@ -8,8 +8,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 from db.connection import get_db_connection
-conn = get_db_connection()
-print(conn)
 from db.repository import (get_documents, get_document_by_id, save_document,
                            get_chat_sessions, create_chat_session,
                            add_message_to_session, get_messages_by_session_id,
@@ -76,54 +74,104 @@ with st.sidebar:
         st.divider()
 
         # Document upload
-        st.subheader("Upload Document")
-        uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
-
-        document_title = st.text_input("Document Title (optional)")
-
-        if uploaded_file is not None and st.button("Process Document"):
-            with st.spinner("Processing document..."):
-                try:
-                    # Save uploaded file temporarily
-                    with tempfile.NamedTemporaryFile(
-                            delete=False, suffix='.pdf') as tmp_file:
-                        tmp_file.write(uploaded_file.getvalue())
-                        tmp_file_path = tmp_file.name
-
-                    # Extract text from PDF
-                    extracted_text = extract_text_from_pdf(tmp_file_path)
-
-                    # Use uploaded filename if no title provided
-                    if not document_title:
-                        document_title = uploaded_file.name
-
-                    # Process document and save to database
-                    document_id = process_document(
-                        text=extracted_text,
-                        title=document_title,
-                        filename=uploaded_file.name,
-                        user_id=st.session_state.user_id)
-
-                    # Clean up temp file
-                    os.unlink(tmp_file_path)
-
-                    st.session_state.current_document_id = document_id
+        st.subheader("Upload Documents")
+        uploaded_files = st.file_uploader("Choose PDF files", type="pdf", accept_multiple_files=True)
+        
+        # Display uploaded files
+        if uploaded_files:
+            st.write(f"Uploaded {len(uploaded_files)} file(s):")
+            for i, file in enumerate(uploaded_files):
+                st.write(f"{i+1}. {file.name}")
+        
+        # Option for batch naming or individual titles
+        naming_option = st.radio("Document Naming", ["Use filenames", "Add a prefix to filenames", "Enter custom names later"])
+        
+        prefix = ""
+        if naming_option == "Add a prefix to filenames":
+            prefix = st.text_input("Enter prefix for all documents:")
+        
+        # Process button
+        if uploaded_files and st.button("Process All Documents"):
+            processed_count = 0
+            last_document_id = None
+            
+            with st.spinner(f"Processing {len(uploaded_files)} documents..."):
+                for i, uploaded_file in enumerate(uploaded_files):
+                    try:
+                        # Create a progress bar
+                        progress_text = f"Processing {uploaded_file.name} ({i+1}/{len(uploaded_files)})"
+                        progress_bar = st.progress(0)
+                        
+                        # Save uploaded file temporarily
+                        with tempfile.NamedTemporaryFile(
+                                delete=False, suffix='.pdf') as tmp_file:
+                            tmp_file.write(uploaded_file.getvalue())
+                            tmp_file_path = tmp_file.name
+                        
+                        progress_bar.progress(25)
+                        
+                        # Extract text from PDF
+                        extracted_text = extract_text_from_pdf(tmp_file_path)
+                        progress_bar.progress(50)
+                        
+                        # Determine document title based on the selected naming option
+                        if naming_option == "Use filenames":
+                            document_title = uploaded_file.name
+                        elif naming_option == "Add a prefix to filenames":
+                            document_title = f"{prefix} {uploaded_file.name}"
+                        else:  # Custom names will be added later
+                            document_title = uploaded_file.name
+                        
+                        # Process document and save to database
+                        document_id = process_document(
+                            text=extracted_text,
+                            title=document_title,
+                            filename=uploaded_file.name,
+                            user_id=st.session_state.user_id)
+                        
+                        progress_bar.progress(75)
+                        
+                        # Clean up temp file
+                        os.unlink(tmp_file_path)
+                        
+                        # Keep track of the last document ID for session creation
+                        last_document_id = document_id
+                        processed_count += 1
+                        
+                        progress_bar.progress(100)
+                        st.success(f"Processed: {document_title}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing document {uploaded_file.name}: {str(e)}")
+                        st.error(f"Error processing {uploaded_file.name}: {str(e)}")
+            
+            if processed_count > 0:
+                st.success(f"Successfully processed {processed_count} out of {len(uploaded_files)} documents!")
+                
+                # Set the current document to the last processed one
+                if last_document_id is not None:
+                    st.session_state.current_document_id = last_document_id
                     st.session_state.document_loaded = True
-                    st.success("Document processed successfully!")
-
-                    # Create a new chat session for this document
-                    session_name = f"Chat about {document_title}"
-                    chat_session_id = create_chat_session(
-                        user_id=st.session_state.user_id,
-                        document_id=document_id,
-                        name=session_name)
-                    st.session_state.current_chat_session_id = chat_session_id
-                    st.session_state.messages = []
-
-                    st.rerun()
-                except Exception as e:
-                    logger.error(f"Error processing document: {str(e)}")
-                    st.error(f"Error processing document: {str(e)}")
+                    
+                    # Get document info for session name
+                    document = get_document_by_id(last_document_id)
+                    if document is not None:
+                        document_title = document.get('title', f"Document {last_document_id}")
+                        
+                        # Create a new chat session for the last document
+                        session_name = f"Chat about {document_title}"
+                        chat_session_id = create_chat_session(
+                            user_id=st.session_state.user_id,
+                            document_id=last_document_id,
+                            name=session_name)
+                        st.session_state.current_chat_session_id = chat_session_id
+                        st.session_state.messages = []
+                        
+                        st.info("Created chat session for the last document. You can select other documents from your library.")
+                        time.sleep(2)  # Give user time to read the message
+                        st.rerun()
+            else:
+                st.error("Failed to process any documents. Please try again.")
 
         st.divider()
 
@@ -162,13 +210,18 @@ with st.sidebar:
                     else:
                         # Create a new chat session
                         document = get_document_by_id(document_id)
-                        session_name = f"Chat about {document['title']}"
-                        chat_session_id = create_chat_session(
-                            user_id=st.session_state.user_id,
-                            document_id=document_id,
-                            name=session_name)
-                        st.session_state.current_chat_session_id = chat_session_id
-                        st.session_state.messages = []
+                        chat_session_id = None
+                        if document is not None:
+                            document_title = document.get('title', f"Document {document_id}")
+                            session_name = f"Chat about {document_title}"
+                            chat_session_id = create_chat_session(
+                                user_id=st.session_state.user_id,
+                                document_id=document_id,
+                                name=session_name)
+                        
+                        if chat_session_id is not None:
+                            st.session_state.current_chat_session_id = chat_session_id
+                            st.session_state.messages = []
 
                     st.session_state.document_loaded = True
                     st.rerun()
@@ -228,9 +281,13 @@ elif not st.session_state.document_loaded:
 else:
     # Display current document info
     try:
-        document = get_document_by_id(st.session_state.current_document_id)
-        st.subheader(f"Document: {document['title']}")
-        st.caption(f"Uploaded on: {document['created_at']}")
+        if st.session_state.current_document_id is not None:
+            document = get_document_by_id(st.session_state.current_document_id)
+            if document is not None:
+                document_title = document.get('title', 'Document')
+                document_date = document.get('created_at', 'Unknown date')
+                st.subheader(f"Document: {document_title}")
+                st.caption(f"Uploaded on: {document_date}")
 
         # Display chat messages
         st.subheader("Chat")
@@ -271,10 +328,12 @@ else:
                         query_embedding = embedding_model.embed_query(prompt)
 
                         # Search for relevant chunks
-                        relevant_chunks = search_document_chunks(
-                            document_id=st.session_state.current_document_id,
-                            query_embedding=query_embedding,
-                            limit=5)
+                        relevant_chunks = []
+                        if st.session_state.current_document_id is not None:
+                            relevant_chunks = search_document_chunks(
+                                document_id=st.session_state.current_document_id,
+                                query_embedding=query_embedding,
+                                limit=5)
 
                         if relevant_chunks:
                             # Construct context from chunks
