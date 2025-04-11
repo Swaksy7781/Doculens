@@ -8,6 +8,8 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 from db.connection import get_db_connection
+conn = get_db_connection()
+print(conn)
 from db.repository import (get_documents, get_document_by_id, save_document,
                            get_chat_sessions, create_chat_session,
                            add_message_to_session, get_messages_by_session_id,
