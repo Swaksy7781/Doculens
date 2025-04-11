@@ -6,3 +6,10 @@ PyPDF2
 chromadb
 faiss-cpu
 langchain_google_genai
+langchain-community
+sqlalchemy
+psycopg2-binary
+alembic
+pgvector
+pandas    
+openai
