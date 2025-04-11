@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    embedding vector(1536), -- Dimensionality depends on embedding model
+    embedding vector(768), -- Dimensionality depends on embedding model
     chunk_order INTEGER NOT NULL,
     chunk_metadata JSONB DEFAULT '{}'::JSONB,
     CONSTRAINT content_not_empty CHECK (LENGTH(content) > 0)
@@ -73,3 +73,4 @@ CREATE TABLE IF NOT EXISTS messages (
 
 -- Index on session_id for faster message queries
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+
