@@ -233,7 +233,7 @@ def get_document_chunks(document_id: int) -> List[Dict[str, Any]]:
 
 def search_document_chunks(document_id: int, query_embedding: List[float], limit: int = 5) -> List[Dict[str, Any]]:
     """
-    Search for document chunks similar to the query embedding.
+    Search for document chunks similar to the query embedding within a single document.
     
     Args:
         document_id: The ID of the document to search within
@@ -259,6 +259,49 @@ def search_document_chunks(document_id: int, query_embedding: List[float], limit
         return result or []
     except Exception as e:
         logger.error(f"Error searching document chunks: {e}")
+        raise
+
+
+def search_across_documents(user_id: int, query_embedding: List[float], document_ids: List[int] = None, limit: int = 5) -> List[Dict[str, Any]]:
+    """
+    Search for document chunks similar to the query embedding across multiple documents.
+    
+    Args:
+        user_id: The ID of the user (to limit search to their documents)
+        query_embedding: The vector embedding of the query
+        document_ids: Optional list of document IDs to search within (if None, searches all user's documents)
+        limit: Maximum number of results to return
+    
+    Returns:
+        A list of dictionaries containing chunk information ordered by similarity, including document titles
+    """
+    try:
+        if document_ids and len(document_ids) > 0:
+            # Convert the list of IDs to a PostgreSQL array string
+            doc_ids_str = ','.join(str(doc_id) for doc_id in document_ids)
+            where_clause = f"WHERE dc.document_id IN ({doc_ids_str}) AND d.user_id = %s"
+            params = (query_embedding, user_id, limit)
+        else:
+            # Search across all of the user's documents
+            where_clause = "WHERE d.user_id = %s"
+            params = (query_embedding, user_id, limit)
+        
+        # This query joins document_chunks with documents to get title information
+        query = f"""
+        SELECT dc.id, dc.document_id, dc.content, dc.chunk_metadata, 
+               d.title as document_title, d.filename,
+               1 - (dc.embedding <=> %s::vector) AS similarity
+        FROM document_chunks dc
+        JOIN documents d ON dc.document_id = d.id
+        {where_clause}
+        ORDER BY similarity DESC
+        LIMIT %s
+        """
+        
+        result = execute_query(query, params, fetch_all=True)
+        return result or []
+    except Exception as e:
+        logger.error(f"Error searching across documents: {e}")
         raise
 
 
